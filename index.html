@@ -66,6 +66,11 @@ label.l{display:block;font-size:.85rem;color:var(--mut);margin:10px 0 4px}
 .comp{flex:none;padding:6px 16px 12px}
 .cbox{max-width:860px;margin:0 auto;background:var(--card);border:1px solid var(--bd);border-radius:24px;padding:8px 16px;box-shadow:0 2px 12px rgba(0,0,0,.07)}
 .cbox textarea{width:100%;border:0;outline:0;resize:none;background:transparent;color:var(--tx);font:inherit;font-size:16px;line-height:1.6;max-height:180px;min-height:28px;display:block;padding:4px 0}
+.cbox{position:relative}
+.cprev{display:none;color:var(--mut);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;cursor:pointer;padding:5px 0;font-size:.95rem}
+.comp.min .cbox textarea{display:none}
+.comp.min .cprev{display:block}
+.tg{border:0;background:var(--hd);color:var(--tx);font:inherit;font-size:.8rem;cursor:pointer;padding:3px 12px;border-radius:99px;margin-inline-start:auto;min-height:30px}
 .chint{max-width:860px;margin:6px auto 0;display:flex;gap:10px;align-items:center;flex-wrap:wrap;padding:0 6px}
 .badge{display:inline-flex;align-items:center;gap:6px;font-size:.75rem;color:var(--ok);white-space:nowrap}
 .dot{width:7px;height:7px;border-radius:50%;background:var(--ok);animation:p 1.8s infinite}
@@ -130,10 +135,10 @@ label.l{display:block;font-size:.85rem;color:var(--mut);margin:10px 0 4px}
 </main>
 
 <footer class="comp">
-  <div class="cbox"><textarea id="ta" rows="1" aria-label="کادر متن" placeholder="متن را بنویسید… مثال: نام برو جلو سن برو پایین علی برو جلو ۳۰"></textarea></div>
+  <div class="cbox"><textarea id="ta" rows="1" aria-label="کادر متن" placeholder="متن را بنویسید… مثال: نام برو جلو سن برو پایین علی برو جلو ۳۰"></textarea><div class="cprev" id="cprev" role="button" tabindex="0" title="باز کردن کادر متن"></div></div>
   <div class="chint">
     <span class="badge" title="تغییرات در دو سو همزمان اعمال می‌شود"><span class="dot"></span>سینک دوطرفه فعال است</span>
-    <span class="hint" id="kwHint"></span>
+    <span class="hint" id="kwHint"></span><button class="tg" id="compToggle" aria-expanded="true" title="کوچک یا بزرگ کردن کادر متن">▾ کوچک کردن</button>
   </div>
 </footer>
 </div>
@@ -203,7 +208,7 @@ function saveSettings(){try{localStorage.setItem(KEY,JSON.stringify({colKw,rowKw
 
 /* ---------- UI helpers ---------- */
 function toast(m){const t=$('toast');t.textContent=m;t.classList.add('show');clearTimeout(toast.t);toast.t=setTimeout(()=>t.classList.remove('show'),2000)}
-function autosize(){ta.style.height='auto';ta.style.height=Math.min(ta.scrollHeight,180)+'px'}
+function autosize(){ta.style.height='auto';ta.style.height=Math.min(ta.scrollHeight,Math.max(80,Math.round(innerHeight*0.28)))+'px'}
 let pending=null;
 function ask(msg,fn){pending=fn;$('dmsg').textContent=msg;$('ov').classList.add('show');$('no').focus()}
 function closeAsk(){pending=null;$('ov').classList.remove('show')}
@@ -251,7 +256,7 @@ function syncTextFromTable(){
   if(syncingFromText)return;
   syncingFromTable=true;
   const t=toText();
-  if(ta.value!==t){ta.value=t;autosize()}
+  if(ta.value!==t){ta.value=t;autosize();updPrev()}
   syncingFromTable=false;
 }
 function syncTableFromText(){
@@ -299,7 +304,7 @@ $('tableArea').addEventListener('click',e=>{
   if(e.target.id==='exBtn'){
     const c=' '+(colKw[0]||'|')+' ',r=rowKw[0]?' '+rowKw[0]+' ':'\n';
     ta.value=['نام','سن','شهر'].join(c)+r+['علی','۳۰','تهران'].join(c)+r+['سارا','۲۵','شیراز'].join(c);
-    autosize();syncTableFromText();return;
+    autosize();updPrev();syncTableFromText();return;
   }
   const b=e.target.closest('button');if(!b)return;
   if(b.dataset.dr!==undefined){
@@ -525,12 +530,30 @@ $('transBtn').onclick=async()=>{
     transData={headers:cells[0],rows:cells.slice(1)};renderTrans();
     $('transArea').scrollIntoView({block:'nearest',behavior:'smooth'});
   }catch(e){
-    const net=e instanceof TypeError;
-    $('transArea').innerHTML='<div class="err">خطا: '+esc(e.message)+(net?'<br>ارتباط با API برقرار نشد؛ آدرس را بررسی کنید. ممکن است محدودیت CORS یا امنیتی مرورگر/صفحه جلوی درخواست را گرفته باشد.':'')+'</div>';
+    const net=e instanceof TypeError;const pub=/claude|anthropic/i.test(location.hostname);
+    $('transArea').innerHTML='<div class="err">خطا: '+esc(e.message)+(net&&pub?'<br><b>این صفحه روی claude.ai منتشر شده و مرورگر اجازه درخواست به سایت‌های دیگر را نمی‌دهد. فایل HTML را دانلود کنید و محلی یا روی هاست خودتان باز کنید.</b>':'')+(net?'<br>ارتباط با API برقرار نشد؛ آدرس را بررسی کنید. ممکن است محدودیت CORS یا امنیتی مرورگر/صفحه جلوی درخواست را گرفته باشد.':'')+'</div>';
   }finally{busy=false;btn.disabled=false;btn.textContent='ترجمه جدول'}
 };
 
-render();changed();autosize();
+/* ---------- Minimizable composer ---------- */
+const UIK='tablesync.ui.v1',compEl=document.querySelector('.comp');
+function updPrev(){
+  const l=ta.value.split(/\r?\n/).filter(Boolean);
+  $('cprev').textContent=ta.value.trim()?('✎ '+l[0]+(l.length>1?'  (+'+(l.length-1)+' خط)':'')):'✎ کادر متن (برای باز کردن لمس کنید)';
+}
+function setMin(m,focus){
+  compEl.classList.toggle('min',m);
+  const b=$('compToggle');b.textContent=m?'▴ باز کردن':'▾ کوچک کردن';b.setAttribute('aria-expanded',String(!m));
+  try{localStorage.setItem(UIK,m?'1':'0')}catch(e){}
+  if(m)updPrev();else{autosize();if(focus)ta.focus()}
+}
+$('compToggle').onclick=()=>setMin(!compEl.classList.contains('min'),false);
+$('cprev').onclick=()=>setMin(false,true);
+$('cprev').onkeydown=e=>{if(e.key==='Enter'||e.key===' '){e.preventDefault();setMin(false,true)}};
+ta.addEventListener('input',updPrev);
+
+render();changed();autosize();updPrev();
+try{if(localStorage.getItem(UIK)==='1')setMin(true,false)}catch(e){}
 </script>
 </body>
 </html>
